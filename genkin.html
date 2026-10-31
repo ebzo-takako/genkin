@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>現金出納帳</title>
+<style>
+  :root{--bg:#f6f5f2;--card:#fff;--ink:#222;--sub:#777;--line:#e4e1da;--main:#2f5d8a;--in:#2e7d4f;--out:#c0392b}
+  @media (prefers-color-scheme:dark){:root{--bg:#161616;--card:#222;--ink:#eee;--sub:#999;--line:#383838;--main:#6aa3d6;--in:#5fbf86;--out:#ef7b6e}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans",sans-serif;padding:0 16px 80px;max-width:640px;margin:auto}
+  h1{font-size:18px;margin:16px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+  .bal{font-size:32px;font-weight:700}
+  .sub{color:var(--sub);font-size:12px}
+  .tabs{display:flex;gap:8px;margin:12px 0}
+  .tabs button{flex:1}
+  button,select,input{font:inherit;color:var(--ink)}
+  button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;cursor:pointer}
+  button.on,button.primary{background:var(--main);color:#fff;border-color:var(--main)}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin:4px 0}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .kinds{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0}
+  .kinds button{padding:10px 2px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:right}
+  td:first-child,th:first-child{text-align:left}
+  .in{color:var(--in)}.out{color:var(--out)}
+  .memo{display:block;color:var(--sub);font-size:12px;text-align:left}
+  .del{border:0;background:none;color:var(--sub);padding:2px 6px}
+  .hide{display:none}
+  #status{font-size:12px;color:var(--sub);margin-top:6px}
+</style>
+</head>
+<body>
+<h1>現金出納帳</h1>
+
+<div class="card">
+  <div class="sub">手元の現金(帳簿)</div>
+  <div class="bal" id="bal">0円</div>
+  <div class="sub" id="today"></div>
+</div>
+
+<div class="tabs">
+  <button id="t1" class="on">入力・一覧</button>
+  <button id="t2">月次締め</button>
+  <button id="t3">保存・同期</button>
+</div>
+
+<!-- 入力・一覧 -->
+<div id="p1">
+  <div class="card">
+    <button class="primary" id="morning" style="width:100%">☀ 朝の釣銭 10,000円を出す</button>
+    <div class="kinds" id="kinds"></div>
+    <div class="row">
+      <input type="date" id="date">
+      <input type="number" id="amount" inputmode="numeric" placeholder="金額(円)">
+    </div>
+    <input type="text" id="memo" placeholder="メモ(例: コピー用紙・領収書あり)">
+    <button class="primary" id="add" style="width:100%;margin-top:6px">記録する</button>
+  </div>
+  <div class="card">
+    <select id="listMonth"></select>
+    <table id="list"></table>
+  </div>
+</div>
+
+<!-- 月次締め -->
+<div id="p2" class="hide">
+  <div class="card">
+    <select id="sumMonth"></select>
+    <table id="sum"></table>
+    <p class="sub">月末に実際の現金を数えて入力すると、帳簿との差異が出ます。</p>
+    <input type="number" id="count" inputmode="numeric" placeholder="実際の現金(円)">
+    <div id="diff" style="margin-top:6px"></div>
+  </div>
+</div>
+
+<!-- 保存・同期 -->
+<div id="p3" class="hide">
+  <div class="card">
+    <p class="sub">データは genkin.json に保存します。iCloud Drive の「現金出納帳」フォルダに置くと、PCとスマホで共有できます。</p>
+    <button id="pick" style="width:100%;margin-bottom:8px">PC: genkin.json を選ぶ(以後は自動保存)</button>
+    <button id="imp" style="width:100%;margin-bottom:8px">読み込み(genkin.json を選ぶ)</button>
+    <button id="exp" style="width:100%;margin-bottom:8px">書き出し(genkin.json を保存)</button>
+    <input type="number" id="opening" inputmode="numeric" placeholder="開始残高(円)">
+    <div id="status"></div>
+    <input type="file" id="file" accept=".json,application/json" class="hide">
+  </div>
+</div>
+
+<script>
+// ---- データ ----
+const KINDS = [
+  {k:'釣銭', label:'朝の釣銭', sign:+1},
+  {k:'売上', label:'売上',     sign:+1},
+  {k:'支出', label:'支出',     sign:-1},
+  {k:'預入', label:'銀行預入', sign:-1},
+];
+const LS = 'genkin-v1';
+let data = load();
+let kind = '売上';
+let fileHandle = null;
+
+function load(){
+  try{ const d = JSON.parse(localStorage.getItem(LS)); if(d&&d.entries) return d; }catch(e){}
+  return {version:1, opening:0, entries:[], counts:{}};
+}
+const yen = n => (n<0?'-':'') + Math.abs(n).toLocaleString('ja-JP') + '円';
+const ymd = d => d.toISOString ? new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10) : d;
+const $ = id => document.getElementById(id);
+const sign = k => KINDS.find(x=>x.k===k).sign;
+const label = k => KINDS.find(x=>x.k===k).label;
+
+// ---- 保存(localStorage + 選択済みファイルへ自動書き込み) ----
+async function save(){
+  localStorage.setItem(LS, JSON.stringify(data));
+  if(fileHandle){
+    try{
+      const w = await fileHandle.createWritable();
+      await w.write(JSON.stringify(data,null,2)); await w.close();
+      status('保存しました ' + new Date().toLocaleTimeString('ja-JP'));
+    }catch(e){ status('ファイル保存に失敗: ' + e.message); }
+  }
+  render();
+}
+function status(t){ $('status').textContent = t; }
+
+// ---- 表示 ----
+function monthsList(){
+  const set = new Set([ymd(new Date()).slice(0,7)]);
+  data.entries.forEach(e=>set.add(e.date.slice(0,7)));
+  return [...set].sort().reverse();
+}
+function fillSelect(sel){
+  const cur = sel.value, ms = monthsList();
+  sel.innerHTML = ms.map(m=>`<option value="${m}">${m.replace('-','年')}月</option>`).join('');
+  sel.value = ms.includes(cur) ? cur : ms[0];
+}
+function sorted(){ return [...data.entries].sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id); }
+
+function render(){
+  // 残高
+  const total = data.opening + data.entries.reduce((s,e)=>s+sign(e.kind)*e.amount,0);
+  $('bal').textContent = yen(total);
+  $('today').textContent = '開始残高 ' + yen(data.opening);
+  $('opening').value = data.opening || '';
+  fillSelect($('listMonth')); fillSelect($('sumMonth'));
+
+  // 一覧(残高つき)
+  const m = $('listMonth').value; let run = data.opening; let rows='';
+  for(const e of sorted()){
+    run += sign(e.kind)*e.amount;
+    if(e.date.slice(0,7)!==m) continue;
+    rows += `<tr><td>${e.date.slice(5).replace('-','/')} ${label(e.kind)}<span class="memo">${esc(e.memo)}</span></td>
+      <td class="${sign(e.kind)>0?'in':'out'}">${sign(e.kind)>0?'+':'-'}${e.amount.toLocaleString()}</td>
+      <td>${run.toLocaleString()}</td><td><button class="del" data-id="${e.id}">×</button></td></tr>`;
+  }
+  $('list').innerHTML = '<tr><th>日付・内容</th><th>金額</th><th>残高</th><th></th></tr>' + (rows||'<tr><td colspan="4" class="sub">この月の記録はありません</td></tr>');
+
+  // 月次
+  const sm = $('sumMonth').value;
+  const before = data.opening + data.entries.filter(e=>e.date.slice(0,7)<sm).reduce((s,e)=>s+sign(e.kind)*e.amount,0);
+  const by = k => data.entries.filter(e=>e.date.slice(0,7)===sm&&e.kind===k).reduce((s,e)=>s+e.amount,0);
+  const end = before + by('釣銭') + by('売上') - by('支出') - by('預入');
+  $('sum').innerHTML = [['月初残高',before],['＋ 朝の釣銭',by('釣銭')],['＋ 売上',by('売上')],['－ 支出',by('支出')],['－ 銀行預入',by('預入')],['月末残高(帳簿)',end]]
+    .map((r,i)=>`<tr><td${i==5?' style="font-weight:700"':''}>${r[0]}</td><td${i==5?' style="font-weight:700"':''}>${yen(r[1])}</td></tr>`).join('');
+  const c = data.counts[sm];
+  if(document.activeElement!==$('count')) $('count').value = c ?? '';
+  $('diff').innerHTML = c==null ? '' : `差異(実際 − 帳簿): <b class="${c-end===0?'':'out'}">${yen(c-end)}</b>` + (c-end===0?' ✓ 一致':'');
+}
+const esc = s => (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---- 操作 ----
+function add(k, amount, memo, date){
+  const last = Math.max(0, ...data.entries.map(e=>e.id));
+  data.entries.push({id:Math.max(Date.now(), last+1), date, kind:k, memo, amount});
+  save();
+}
+$('kinds').innerHTML = KINDS.map(x=>`<button data-k="${x.k}">${x.label}</button>`).join('');
+$('kinds').onclick = e => { const k=e.target.dataset.k; if(!k) return; kind=k;
+  [...$('kinds').children].forEach(b=>b.classList.toggle('on',b.dataset.k===k)); };
+$('kinds').querySelector('[data-k="売上"]').classList.add('on');
+$('date').value = ymd(new Date());
+
+$('morning').onclick = () => { add('釣銭',10000,'朝の釣銭',$('date').value); };
+$('add').onclick = () => {
+  const a = parseInt($('amount').value,10);
+  if(!a||a<=0){ alert('金額を入れてください'); return; }
+  add(kind, a, $('memo').value.trim(), $('date').value);
+  $('amount').value=''; $('memo').value='';
+};
+$('list').onclick = e => { const id=e.target.dataset.id; if(!id) return;
+  if(confirm('この記録を削除しますか?')){ data.entries=data.entries.filter(x=>x.id!=id); save(); } };
+$('listMonth').onchange = render; $('sumMonth').onchange = render;
+$('count').onchange = () => { const v=$('count').value; const m=$('sumMonth').value;
+  if(v==='') delete data.counts[m]; else data.counts[m]=parseInt(v,10); save(); };
+$('opening').onchange = () => { data.opening=parseInt($('opening').value,10)||0; save(); };
+
+// タブ
+['t1','t2','t3'].forEach((t,i)=>$(t).onclick=()=>{
+  ['t1','t2','t3'].forEach((u,j)=>{ $(u).classList.toggle('on',i===j); $('p'+(j+1)).classList.toggle('hide',i!==j); });
+});
+
+// ---- JSONファイル連携 ----
+function adopt(text){
+  const d = JSON.parse(text);
+  if(!d||!Array.isArray(d.entries)) throw new Error('形式が違います');
+  data = {version:1, opening:d.opening||0, entries:d.entries, counts:d.counts||{}};
+  localStorage.setItem(LS, JSON.stringify(data)); render();
+}
+// PC(Chrome/Edge): ファイルを選ぶと以後は自動で読み書き
+$('pick').onclick = async () => {
+  if(!window.showOpenFilePicker){ alert('このブラウザは自動保存に未対応です。読み込み/書き出しを使ってください。'); return; }
+  try{
+    [fileHandle] = await showOpenFilePicker({types:[{description:'JSON',accept:{'application/json':['.json']}}]});
+    const text = await (await fileHandle.getFile()).text();
+    if(text.trim()) adopt(text);
+    status('接続しました: ' + fileHandle.name + '(以後は自動保存)');
+  }catch(e){ if(e.name!=='AbortError') status('失敗: ' + e.message); }
+};
+// 読み込み(スマホ・PC共通)
+$('imp').onclick = () => $('file').click();
+$('file').onchange = async () => { const f=$('file').files[0]; if(!f) return;
+  try{ adopt(await f.text()); status('読み込みました: ' + f.name); }catch(e){ status('失敗: ' + e.message); } $('file').value=''; };
+// 書き出し(スマホは共有シート→「ファイルに保存」→iCloud Drive の現金出納帳)
+$('exp').onclick = async () => {
+  const file = new File([JSON.stringify(data,null,2)], 'genkin.json', {type:'application/json'});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file]}); status('共有しました'); return; }catch(e){ if(e.name==='AbortError') return; }
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download='genkin.json'; a.click();
+  status('genkin.json をダウンロードしました');
+};
+render();
+</script>
+</body>
+</html>
