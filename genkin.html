@@ -20,7 +20,7 @@
   button.on,button.primary{background:var(--main);color:#fff;border-color:var(--main)}
   input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin:4px 0}
   .row{display:flex;gap:8px}.row>*{flex:1}
-  .kinds{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0}
+  .kinds{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:6px 0}
   .kinds button{padding:10px 2px;font-size:13px}
   table{width:100%;border-collapse:collapse;font-size:14px}
   td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:right}
@@ -92,7 +92,8 @@
 <script>
 // ---- データ ----
 const KINDS = [
-  {k:'釣銭', label:'朝の釣銭', sign:+1},
+  {k:'釣銭', label:'朝の釣銭', sign:-1},  // 金庫から出す
+  {k:'戻し', label:'釣銭戻し', sign:+1},  // 夕方、釣銭を金庫に戻す
   {k:'売上', label:'売上',     sign:+1},
   {k:'支出', label:'支出',     sign:-1},
   {k:'預入', label:'銀行預入', sign:-1},
@@ -162,9 +163,9 @@ function render(){
   const sm = $('sumMonth').value;
   const before = data.opening + data.entries.filter(e=>e.date.slice(0,7)<sm).reduce((s,e)=>s+sign(e.kind)*e.amount,0);
   const by = k => data.entries.filter(e=>e.date.slice(0,7)===sm&&e.kind===k).reduce((s,e)=>s+e.amount,0);
-  const end = before + by('釣銭') + by('売上') - by('支出') - by('預入');
-  $('sum').innerHTML = [['月初残高',before],['＋ 朝の釣銭',by('釣銭')],['＋ 売上',by('売上')],['－ 支出',by('支出')],['－ 銀行預入',by('預入')],['月末残高(帳簿)',end]]
-    .map((r,i)=>`<tr><td${i==5?' style="font-weight:700"':''}>${r[0]}</td><td${i==5?' style="font-weight:700"':''}>${yen(r[1])}</td></tr>`).join('');
+  const end = before - by('釣銭') + by('戻し') + by('売上') - by('支出') - by('預入');
+  $('sum').innerHTML = [['月初残高',before],['－ 朝の釣銭',by('釣銭')],['＋ 釣銭戻し',by('戻し')],['＋ 売上',by('売上')],['－ 支出',by('支出')],['－ 銀行預入',by('預入')],['月末残高(帳簿)',end]]
+    .map((r,i)=>`<tr><td${i==6?' style="font-weight:700"':''}>${r[0]}</td><td${i==6?' style="font-weight:700"':''}>${yen(r[1])}</td></tr>`).join('');
   const c = data.counts[sm];
   if(document.activeElement!==$('count')) $('count').value = c ?? '';
   $('diff').innerHTML = c==null ? '' : `差異(実際 − 帳簿): <b class="${c-end===0?'':'out'}">${yen(c-end)}</b>` + (c-end===0?' ✓ 一致':'');
